@@ -7,6 +7,15 @@ behavior when BOI is slow, unavailable or returns bad data.
 - `server/` – Node.js, TypeScript, Fastify
 - `client/` – React, Vite, TypeScript
 
+## Live demo
+
+- UI: https://boi-exchange-rates.vercel.app
+- API: https://boi-exchange-rates.onrender.com/api/rates
+- API docs: https://boi-exchange-rates.onrender.com/docs
+
+The API runs on a free plan that sleeps when idle, so the first request can take about a minute.
+The UI on Vercel forwards `/api` to it (`client/vercel.json`).
+
 ## Run with Docker
 
 Requires Docker with Compose.

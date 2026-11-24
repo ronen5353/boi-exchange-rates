@@ -54,7 +54,8 @@ In `server/` or `client/`, after `npm ci`:
 npm test
 ```
 
-BOI is always mocked, so the tests need no network access.
+BOI is always mocked, so the tests need no network access. The PostgreSQL tests are skipped unless
+`TEST_DATABASE_URL` points to a disposable database (its `rates` table is dropped). CI runs them.
 
 ## API
 
@@ -108,8 +109,9 @@ Environment variables of the server, all optional. Invalid values stop it from s
 | `PORT` | `3000` | |
 | `HOST` | `0.0.0.0` | |
 | `LOG_LEVEL` | `info` | |
-| `CACHE_TTL_MS` | `300000` | How long rates are considered fresh |
-| `RETRY_INTERVAL_MS` | `30000` | Wait after a failure or after using the fallback |
+| `DATABASE_URL` | none | PostgreSQL. Without it, rates are kept in memory only |
+| `CACHE_TTL_MS` | `300000` | Time between background refreshes |
+| `RETRY_INTERVAL_MS` | `30000` | The same, after a failure or after using the fallback |
 | `UPSTREAM_TIMEOUT_MS` | `3000` | Timeout of one attempt |
 | `UPSTREAM_ATTEMPTS` | `3` | Attempts per source |
 | `UPSTREAM_BACKOFF_MS` | `200` | Base of the exponential backoff |
@@ -130,8 +132,16 @@ before validation, and a rate is never replaced by one from an earlier date.
 **Retry only what can recover.** Network errors, timeouts, 429 and 5xx are retried with exponential backoff and
 jitter. Other 4xx and invalid data are not, including an HTML page returned with status 200.
 
-**Refresh on demand.** A request refreshes the rates if they are over 5 minutes old; concurrent requests share
-one call to BOI. Rates change about once per business day, so a background timer would add little.
+**Background refresh.** The server refreshes the rates every 5 minutes, or 30 seconds after a failure. Requests are
+answered from memory, so a customer doesn't wait for a slow BOI; only requests that arrive during startup wait. If
+refreshing itself stops, rates become stale by age.
+
+**Rates survive a restart.** Rates are saved in PostgreSQL and restored on startup, marked stale until BOI confirms
+them. The table keeps one row per published value with the times it was first seen and last confirmed, so it is
+also the rate history. The database is optional at run time: if it is down, the API works from memory and
+`/health` reports `storage: "error"`.
+
+**No dates in the future.** A rate with a future date would block the correct ones until that date, so it is rejected.
 
 **Stale is not the same as old.** On weekends and holidays the latest published rate is still valid, so it is not
 stale; `rateDate` shows its date. Staleness is per currency because the fallback covers only three.
@@ -141,9 +151,8 @@ Restarting wouldn't fix BOI, and would lose the cache.
 
 ## Limitations and next steps
 
-- The cache is in memory: it is lost on restart and not shared between instances. Redis would solve both.
+- The live demo has no database, so its rates are lost on restart.
 - There is no maximum age for stale rates. Consumers decide using `stale`, `rateDate` and `fetchedAt`.
-- If both sources hang, one request can wait about 19 seconds. Under constant traffic, a background refresh would
-  avoid that.
+- If everything hangs during startup, the first requests can wait about 25 seconds.
 - Both sources belong to BOI, so one failure could affect both.
 - No authentication or rate limiting.

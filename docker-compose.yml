@@ -1,8 +1,24 @@
 name: boi-rates
 
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      # Local use only; the port is not published.
+      POSTGRES_USER: boi
+      POSTGRES_PASSWORD: boi
+      POSTGRES_DB: boi
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   server:
     build: ./server
+    environment:
+      DATABASE_URL: postgres://boi:boi@db:5432/boi
+    # Deliberately not "service_healthy": the API must start without the database.
+    depends_on:
+      - db
     ports:
       - "3000:3000"
     restart: unless-stopped
@@ -15,3 +31,6 @@ services:
       server:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  db-data:

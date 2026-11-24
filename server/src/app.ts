@@ -6,10 +6,13 @@ import type { Config } from './config.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerRoutes } from './http/routes.js';
 import { RatesService } from './rates/service.js';
+import { createPostgresStore } from './storage/postgres.js';
+import type { RateStore } from './storage/store.js';
 
 export interface AppOverrides {
   fetchFn?: typeof fetch;
   now?: () => number;
+  store?: RateStore;
 }
 
 export async function buildApp(config: Config, overrides: AppOverrides = {}) {
@@ -24,13 +27,25 @@ export async function buildApp(config: Config, overrides: AppOverrides = {}) {
     onRetry: (err: unknown, attempt: number) => app.log.warn({ source, attempt, err }, 'Retrying upstream'),
   });
 
+  const store =
+    overrides.store ??
+    (config.DATABASE_URL
+      ? createPostgresStore(config.DATABASE_URL, (err) => app.log.error({ err }, 'Database connection lost'))
+      : undefined);
+
   const service = new RatesService({
     primary: createBoiProvider(clientOptions('boi', config.BOI_URL)),
     fallback: createSdmxProvider(clientOptions('boi-sdmx', config.SDMX_URL)),
+    store,
     cacheTtlMs: config.CACHE_TTL_MS,
     retryIntervalMs: config.RETRY_INTERVAL_MS,
     log: app.log,
     now: overrides.now,
+  });
+
+  app.addHook('onClose', async () => {
+    await service.stop();
+    await store?.close();
   });
 
   await app.register(swagger, {

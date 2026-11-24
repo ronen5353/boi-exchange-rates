@@ -9,13 +9,15 @@ const down = async () => status(503);
 
 let upstream: ReturnType<typeof fakeUpstream>;
 let time: number;
+let refresh: () => Promise<void>;
 let get: (url: string) => Promise<{ code: number; body: any }>;
 
 beforeEach(async () => {
   upstream = fakeUpstream();
   time = Date.parse('2026-11-24T08:00:00Z');
   const config = loadConfig({ LOG_LEVEL: 'silent', UPSTREAM_ATTEMPTS: '1' });
-  const { app } = await buildApp(config, { fetchFn: upstream.fetchFn, now: () => time });
+  const { app, service } = await buildApp(config, { fetchFn: upstream.fetchFn, now: () => time });
+  refresh = () => service.refresh();
   get = async (url) => {
     const res = await app.inject(url);
     return { code: res.statusCode, body: res.json() };
@@ -73,14 +75,11 @@ describe('endpoints', () => {
 });
 
 describe('caching', () => {
-  it('serves from cache until the TTL expires', async () => {
+  it('calls BOI only for the first request', async () => {
     await get('/api/rates');
-    time += TTL - 1;
+    time += TTL;
     await get('/api/rates');
     expect(upstream.calls.boi).toBe(1);
-    time += 1;
-    await get('/api/rates');
-    expect(upstream.calls.boi).toBe(2);
   });
 
   it('shares one upstream call between concurrent requests', async () => {
@@ -110,6 +109,7 @@ describe('outages', () => {
     await get('/api/rates');
     upstream.handlers.boi = down;
     time += TTL;
+    await refresh();
     expect((await get('/api/rates/USD')).body).toMatchObject({ rate: '3.35', source: 'boi-sdmx', stale: false });
     expect((await get('/api/rates/JPY')).body).toMatchObject({ source: 'boi', stale: true });
     expect((await get('/api/rates')).body.stale).toBe(true);
@@ -120,6 +120,7 @@ describe('outages', () => {
     upstream.handlers.boi = down;
     upstream.handlers.sdmx = down;
     time += TTL;
+    await refresh();
     expect((await get('/api/rates/USD')).body).toMatchObject({
       rate: '3.343',
       stale: true,
@@ -129,6 +130,7 @@ describe('outages', () => {
 
     upstream.handlers.boi = async () => json();
     time += RETRY;
+    await refresh();
     expect((await get('/api/rates')).body.stale).toBe(false);
   });
 
@@ -146,6 +148,7 @@ describe('outages', () => {
     upstream.handlers.boi = async () => json(boiBody([boiItem('USD', -1)]));
     upstream.handlers.sdmx = async () => csv('garbage');
     time += TTL;
+    await refresh();
     expect((await get('/api/rates/USD')).body).toMatchObject({ rate: '3.343', stale: true });
   });
 
@@ -153,6 +156,7 @@ describe('outages', () => {
     await get('/api/rates');
     upstream.handlers.boi = async () => json(boiBody(boiItems().filter((i) => i.key !== 'JPY')));
     time += TTL;
+    await refresh();
     expect((await get('/api/rates/JPY')).body).toMatchObject({ rate: '0.021026', stale: true });
     expect((await get('/api/rates/USD')).body.stale).toBe(false);
   });
@@ -162,6 +166,7 @@ describe('outages', () => {
     upstream.handlers.boi = down;
     upstream.handlers.sdmx = async () => csv(sdmxBody('2026-11-20'));
     time += TTL;
+    await refresh();
     expect((await get('/api/rates/USD')).body).toMatchObject({ rate: '3.343', rateDate: '2026-11-23', stale: true });
   });
 });

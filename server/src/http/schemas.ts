@@ -32,6 +32,7 @@ const HealthResponse = z.object({
     stale: z.boolean(),
     lastSuccessAt: z.string().nullable(),
     lastSource: z.enum(['boi', 'boi-sdmx']).nullable(),
+    storage: z.enum(['disabled', 'unknown', 'ok', 'error']),
   }),
 });
 

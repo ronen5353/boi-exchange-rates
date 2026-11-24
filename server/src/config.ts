@@ -13,6 +13,8 @@ const ConfigSchema = z.object({
       'https://edge.boi.gov.il/FusionEdgeServer/sdmx/v2/data/dataflow/BOI.STATISTICS/EXR/1.0/' +
         'RER_USD_ILS,RER_EUR_ILS,RER_GBP_ILS?lastNObservations=1&format=csv',
     ),
+  /** Optional. Without it, rates are kept in memory only. */
+  DATABASE_URL: z.url().optional(),
   /** How long a successful primary response is considered fresh. */
   CACHE_TTL_MS: positiveInt.default(300_000),
   /** Wait before trying again after a failure, or after having to use the fallback. */

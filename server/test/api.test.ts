@@ -49,6 +49,7 @@ describe('endpoints', () => {
       lastUpdate: '2026-11-23T13:21:10.7104898Z',
       source: 'boi',
       fetchedAt: '2026-11-24T08:00:00.000Z',
+      status: 'fresh',
       stale: false,
     });
   });
@@ -68,7 +69,7 @@ describe('endpoints', () => {
 
   it('GET /health reports data status without calling BOI', async () => {
     expect(await get('/health')).toMatchObject({ code: 200, body: { status: 'ok', rates: { hasData: false } } });
-    expect(upstream.calls).toEqual({ boi: 0, sdmx: 0 });
+    expect(upstream.calls).toMatchObject({ boi: 0, sdmx: 0 });
     await get('/api/rates');
     expect((await get('/health')).body.rates).toMatchObject({ hasData: true, stale: false, lastSource: 'boi' });
   });
@@ -140,7 +141,7 @@ describe('outages', () => {
     expect(await get('/api/rates')).toMatchObject({ code: 503, body: { error: { code: 'NO_DATA' } } });
     expect((await get('/api/rates/USD')).code).toBe(503);
     expect((await get('/api/rates/XYZ')).code).toBe(404);
-    expect(upstream.calls).toEqual({ boi: 1, sdmx: 1 });
+    expect(upstream.calls).toMatchObject({ boi: 1, sdmx: 1 });
   });
 
   it('never replaces good data with malformed data', async () => {

@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import type { StoredRate } from '../src/domain/rates.js';
 import { createPostgresStore } from '../src/storage/postgres.js';
-import type { StoredRate } from '../src/storage/store.js';
 
 const url = process.env.TEST_DATABASE_URL;
 const T1 = '2026-11-24T08:00:00.000Z';
@@ -52,6 +52,14 @@ describe.skipIf(!url)('Postgres store', () => {
     expect(rows[0].first_seen_at.toISOString()).toBe(T1);
     expect(rows[0].confirmed_at.toISOString()).toBe(T2);
     expect((await store.load())[0]).toMatchObject({ rate: '3.35', rateDate: '2026-11-24' });
+    await store.close();
+  });
+
+  it('keeps BOI and ECB rates apart', async () => {
+    const store = open();
+    const ecb: StoredRate = { ...usd, source: 'ecb', rate: '3.35', rateDate: '2026-11-24' };
+    await store.save([usd, ecb]);
+    expect(await store.load()).toEqual([usd, ecb]);
     await store.close();
   });
 

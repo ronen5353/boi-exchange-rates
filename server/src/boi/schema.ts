@@ -1,5 +1,6 @@
 import { parse as parseCsv } from 'csv-parse/sync';
 import { Decimal } from 'decimal.js';
+import { XMLParser } from 'fast-xml-parser';
 import { z } from 'zod';
 import { normalizeRate, REQUIRED_CURRENCIES, toIsraelDate, type Rate } from '../domain/rates.js';
 
@@ -39,6 +40,18 @@ const SdmxRowSchema = z.object({
   UNIT_MULT: z.literal('0'),
   TIME_PERIOD: z.iso.date(),
   OBS_VALUE: positiveDecimal,
+});
+
+// <Cube><Cube time="..."><Cube currency="..." rate="..."/>...</Cube></Cube>
+const EcbSchema = z.object({
+  'gesmes:Envelope': z.object({
+    Cube: z.object({
+      Cube: z.object({
+        time: z.iso.date(),
+        Cube: z.array(z.object({ currency: z.string(), rate: z.string() })),
+      }),
+    }),
+  }),
 });
 
 function assertNoDuplicates(currencies: string[]): void {
@@ -127,4 +140,46 @@ export function parseSdmxResponse(body: string): ParsedRates {
   });
   assertRequiredPresent(rates);
   return { rates, rejected: [] };
+}
+
+/** ECB publishes units of each currency per 1 EUR, so ILS rates are calculated as cross rates. */
+export function parseEcbResponse(body: string): ParsedRates {
+  let document: unknown;
+  try {
+    // Attribute values stay strings by default, so rates never become floats.
+    document = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(body, true);
+  } catch {
+    throw new InvalidUpstreamDataError('ECB response is not valid XML');
+  }
+  const parsed = EcbSchema.safeParse(document);
+  if (!parsed.success) throw new InvalidUpstreamDataError(`Unexpected ECB shape: ${parsed.error.message}`);
+  const { time, Cube: entries } = parsed.data['gesmes:Envelope'].Cube.Cube;
+  assertNoDuplicates(entries.map((e) => e.currency));
+
+  const perEuro = (currency: string): string => {
+    const value = positiveDecimal.safeParse(entries.find((e) => e.currency === currency)?.rate);
+    if (!value.success) throw new InvalidUpstreamDataError(`Missing or invalid ECB rate: ${currency}`);
+    return value.data;
+  };
+  const ils = perEuro('ILS');
+
+  const toRate = (currency: string, unitsPerEuro: string): Rate => {
+    // 4 decimals, like BOI's rates.
+    const value = new Decimal(ils).div(unitsPerEuro).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+    if (!value.gt(0)) throw new InvalidUpstreamDataError(`ECB rate of ${currency} is too small`);
+    return {
+      currency,
+      rate: value.toFixed(),
+      officialRate: value.toFixed(),
+      unit: 1,
+      changePercent: null,
+      rateDate: time,
+      lastUpdate: null,
+      source: 'ecb',
+    };
+  };
+  return {
+    rates: [toRate('USD', perEuro('USD')), toRate('EUR', '1'), toRate('GBP', perEuro('GBP'))],
+    rejected: [],
+  };
 }

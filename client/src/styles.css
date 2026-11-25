@@ -75,7 +75,8 @@ h2 {
 }
 
 .card,
-.converter {
+.converter,
+.status {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -190,6 +191,7 @@ button:disabled {
   outline-offset: 2px;
 }
 
+.blocked,
 .field-error {
   color: var(--down);
   font-size: 0.9rem;
@@ -206,4 +208,41 @@ output {
   .cards {
     grid-template-columns: 1fr;
   }
+}
+
+.status dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.status dl div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 8px;
+}
+
+.status dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 50%;
+}
+
+.dot.good {
+  background: var(--up);
+}
+
+.dot.warn {
+  background: #c98a00;
+}
+
+.dot.bad {
+  background: var(--down);
 }

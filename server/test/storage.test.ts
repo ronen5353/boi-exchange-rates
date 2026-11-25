@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import type { RateStore, StoredRate } from '../src/storage/store.js';
+import type { StoredRate } from '../src/domain/rates.js';
+import type { RateStore } from '../src/storage/store.js';
 import { boiBody, boiItem, boiItems, csv, fakeUpstream, json, sdmxBody, status } from './helpers.js';
 
 const down = async () => status(503);
@@ -14,7 +15,7 @@ const storedUsd: StoredRate = {
   rateDate: '2026-11-20',
   lastUpdate: null,
   source: 'boi',
-  fetchedAt: '2026-11-20T14:00:00.000Z',
+  fetchedAt: '2026-11-24T06:00:00.000Z',
 };
 
 function fakeStore() {
@@ -56,7 +57,7 @@ describe('storage', () => {
     store.load.mockResolvedValue([storedUsd]);
     expect(await get('/api/rates/USD')).toMatchObject({
       code: 200,
-      body: { rate: '3.3', stale: true, rateDate: '2026-11-20', fetchedAt: '2026-11-20T14:00:00.000Z' },
+      body: { rate: '3.3', stale: true, rateDate: '2026-11-20', fetchedAt: '2026-11-24T06:00:00.000Z' },
     });
   });
 

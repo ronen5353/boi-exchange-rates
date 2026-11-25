@@ -1,7 +1,7 @@
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { createBoiProvider, createSdmxProvider } from './boi/client.js';
+import { createBoiProvider, createEcbProvider, createSdmxProvider } from './boi/client.js';
 import type { Config } from './config.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerRoutes } from './http/routes.js';
@@ -36,7 +36,19 @@ export async function buildApp(config: Config, overrides: AppOverrides = {}) {
   const service = new RatesService({
     primary: createBoiProvider(clientOptions('boi', config.BOI_URL)),
     fallback: createSdmxProvider(clientOptions('boi-sdmx', config.SDMX_URL)),
+    backup: createEcbProvider({
+      ...clientOptions('ecb', config.ECB_URL),
+      timeoutMs: config.BACKUP_TIMEOUT_MS,
+      attempts: Math.min(config.UPSTREAM_ATTEMPTS, 2),
+    }),
     store,
+    policy: {
+      maxAgeMs: config.RATE_MAX_AGE_MS,
+      backupMaxAgeDays: config.BACKUP_MAX_AGE_DAYS,
+      maxChangePercent: config.MAX_CHANGE_PERCENT,
+      confirmTolerancePercent: config.CONFIRM_TOLERANCE_PERCENT,
+    },
+    backupIntervalMs: config.BACKUP_INTERVAL_MS,
     cacheTtlMs: config.CACHE_TTL_MS,
     retryIntervalMs: config.RETRY_INTERVAL_MS,
     log: app.log,

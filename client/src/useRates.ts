@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchRates, type Rate } from './api';
+import { fetchRates, fetchStatus, NoUsableRatesError, type Rate, type Status } from './api';
 
 const REFRESH_MS = 60_000;
 
 export function useRates() {
   const [rates, setRates] = useState<Rate[] | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [requestId, setRequestId] = useState(0);
@@ -20,11 +21,16 @@ export function useRates() {
         if (controller.signal.aborted) return;
         setRates(next);
         setFailed(false);
-      } catch {
+      } catch (error) {
         if (controller.signal.aborted) return;
-        // Rates already on screen stay there, with a warning.
+        // Rates already on screen stay there with a warning, unless the API says they can't be used.
+        if (error instanceof NoUsableRatesError) setRates(null);
         setFailed(true);
       }
+      // After the rates, so that it describes a server that has finished starting.
+      const nextStatus = await fetchStatus(controller.signal);
+      if (controller.signal.aborted) return;
+      setStatus(nextStatus);
       setLoading(false);
       // Scheduled after the response, so requests never overlap.
       timer = setTimeout(load, REFRESH_MS);
@@ -38,5 +44,5 @@ export function useRates() {
   }, [requestId]);
 
   const retry = useCallback(() => setRequestId((id) => id + 1), []);
-  return { rates, failed, loading, retry };
+  return { rates, status, failed, loading, retry };
 }

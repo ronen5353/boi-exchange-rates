@@ -1,6 +1,6 @@
 import pg from 'pg';
-import type { RateSource } from '../domain/rates.js';
-import type { RateStore, StoredRate } from './store.js';
+import type { RateSource, StoredRate } from '../domain/rates.js';
+import type { RateStore } from './store.js';
 
 // One row per published value, so the table is also the history of every rate we served.
 // Confirming the same value again only moves confirmed_at.
@@ -77,11 +77,11 @@ export function createPostgresStore(url: string, onError: (err: Error) => void):
       transaction(async (client) => {
         // rate_date::text, because the driver would turn a date into local midnight.
         const { rows } = await client.query<Row>(`
-          SELECT DISTINCT ON (currency)
+          SELECT DISTINCT ON (currency, source = 'ecb')
             currency, rate, official_rate, unit, change_percent,
             rate_date::text AS rate_date, last_update, source, confirmed_at
           FROM rates
-          ORDER BY currency, rates.rate_date DESC, confirmed_at DESC, id DESC`);
+          ORDER BY currency, source = 'ecb', rates.rate_date DESC, confirmed_at DESC, id DESC`);
         return rows.map(
           (row): StoredRate => ({
             currency: row.currency,

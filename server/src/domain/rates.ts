@@ -8,14 +8,14 @@ export const SUPPORTED_CURRENCIES: readonly string[] = [
   'JPY', 'AUD', 'CAD', 'DKK', 'NOK', 'ZAR', 'SEK', 'CHF', 'JOD', 'LBP', 'EGP',
 ];
 
-export type RateSource = 'boi' | 'boi-sdmx';
+export type RateSource = 'boi' | 'boi-sdmx' | 'ecb';
 
 /** One validated rate from an upstream source. Decimals are strings throughout. */
 export interface Rate {
   currency: string;
   /** ILS per 1 unit of the currency. */
   rate: string;
-  /** ILS per `unit`, as published. */
+  /** ILS per `unit`, as published (calculated from EUR rates when the source is ECB). */
   officialRate: string;
   unit: number;
   changePercent: string | null;
@@ -25,9 +25,15 @@ export interface Rate {
   source: RateSource;
 }
 
-export interface ServedRate extends Rate {
+export interface StoredRate extends Rate {
+  /** When the source last confirmed this rate. */
   fetchedAt: string;
-  /** True when the latest refresh could not renew this rate. */
+}
+
+export interface ServedRate extends StoredRate {
+  /** `backup` is not a BOI rate. */
+  status: 'fresh' | 'stale' | 'backup';
+  /** True unless the status is `fresh`. */
   stale: boolean;
 }
 

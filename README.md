@@ -63,6 +63,7 @@ BOI is always mocked, so the tests need no network access. The PostgreSQL tests 
 |---|---|
 | `GET /api/rates` | All rates |
 | `GET /api/rates/:currency` | One rate, e.g. `/api/rates/USD` (case-insensitive) |
+| `GET /api/status` | Data status, for the UI: what is served from where, and what is blocked |
 | `GET /health` | Process health and data status |
 
 Example, `GET /api/rates/JPY`:
@@ -79,6 +80,7 @@ Example, `GET /api/rates/JPY`:
   "lastUpdate": "2026-11-23T13:21:10.7104898Z",
   "source": "boi",
   "fetchedAt": "2026-11-24T07:55:39.488Z",
+  "status": "fresh",
   "stale": false
 }
 ```
@@ -86,8 +88,9 @@ Example, `GET /api/rates/JPY`:
 - `rate` – ILS per **one** unit of the currency. Use this one for calculations.
 - `officialRate`, `unit` – as published: 2.1026 ILS per 100 JPY.
 - `rateDate` – publication date in Israel.
-- `source` – `boi`, or `boi-sdmx` for the fallback, where `changePercent` and `lastUpdate` are `null`.
-- `stale` – the latest refresh could not renew this rate, so it is the last known one.
+- `source` – `boi`, `boi-sdmx` or `ecb`. Except with `boi`, `changePercent` and `lastUpdate` are `null`.
+- `status` – `fresh`; `stale`: the last known BOI rate, still within its time limit; `backup`: not a BOI rate.
+- `stale` – true unless the status is `fresh`.
 
 Errors have the form `{ "error": { "code", "message" } }`:
 
@@ -95,7 +98,9 @@ Errors have the form `{ "error": { "code", "message" } }`:
 |---|---|---|
 | 404 | `UNSUPPORTED_CURRENCY` | Currency not supported |
 | 404 | `NOT_FOUND` | No such route |
-| 503 | `NO_DATA` | No rates at all |
+| 503 | `NO_DATA` | No usable rates at all |
+| 503 | `RATE_EXPIRED` | The last known rate is too old, and there is no usable backup |
+| 503 | `RATE_HELD` | An unusual change is waiting for confirmation |
 | 503 | `RATE_UNAVAILABLE` | Supported currency, but no rate for it right now |
 
 Supported: USD, EUR, GBP, JPY, AUD, CAD, DKK, NOK, ZAR, SEK, CHF, JOD, LBP, EGP.
@@ -112,15 +117,34 @@ Environment variables of the server, all optional. Invalid values stop it from s
 | `DATABASE_URL` | none | PostgreSQL. Without it, rates are kept in memory only |
 | `CACHE_TTL_MS` | `300000` | Time between background refreshes |
 | `RETRY_INTERVAL_MS` | `30000` | The same, after a failure or after using the fallback |
+| `BACKUP_INTERVAL_MS` | `3600000` | Time between ECB refreshes |
+| `RATE_MAX_AGE_MS` | `86400000` | How long a BOI rate may be used after its last confirmation |
+| `BACKUP_MAX_AGE_DAYS` | `4` | Maximum age of an ECB rate |
+| `MAX_CHANGE_PERCENT` | `5` | A larger change needs confirmation |
+| `CONFIRM_TOLERANCE_PERCENT` | `2` | How close a confirming source must be |
 | `UPSTREAM_TIMEOUT_MS` | `3000` | Timeout of one attempt |
+| `BACKUP_TIMEOUT_MS` | `10000` | The same, for ECB |
 | `UPSTREAM_ATTEMPTS` | `3` | Attempts per source |
 | `UPSTREAM_BACKOFF_MS` | `200` | Base of the exponential backoff |
-| `BOI_URL`, `SDMX_URL` | BOI addresses | Upstream sources |
+| `BOI_URL`, `SDMX_URL`, `ECB_URL` | public addresses | Upstream sources |
 
 ## Design decisions
 
-**Two sources.** Rates come from BOI's public API. If it fails, USD, EUR and GBP come from BOI's SDMX API.
-If that fails too, the last known rates are served with `stale: true`; with none, the response is 503.
+**Layers of sources.** A customer who can't convert can't buy, so each layer covers for the one before it:
+
+1. BOI's public API.
+2. BOI's SDMX API, for USD, EUR and GBP.
+3. The last known BOI rate, for 24 hours after BOI last confirmed it (`stale`).
+4. The European Central Bank, for USD, EUR and GBP (`backup`). It is independent of BOI, but not the BOI rate.
+5. A clear 503. A wrong conversion can't easily be undone, so a rate that can't be trusted is not returned.
+
+A recent BOI rate comes before ECB because BOI publishes about once per business day, so it is usually still the
+official one.
+
+**Unusual changes need confirmation.** A change of more than 5% is accepted only if SDMX or ECB agrees, or if BOI
+repeats it in its next publication. If SDMX contradicts it, SDMX is used. SDMX belongs to BOI and can repeat its
+mistake, so a BOI rate is also rejected if an ECB rate of the same date or later contradicts it, and ECB is used.
+Otherwise that currency is blocked: either the old or the new rate may be wrong.
 
 **No float math.** JSON numbers are read as their original text, calculated with `decimal.js` and returned
 as strings. The converter in the UI works the same way and rounds only the final result.
@@ -152,7 +176,9 @@ Restarting wouldn't fix BOI, and would lose the cache.
 ## Limitations and next steps
 
 - The live demo has no database, so its rates are lost on restart.
-- There is no maximum age for stale rates. Consumers decide using `stale`, `rateDate` and `fetchedAt`.
+- The time limits and percentages are assumptions that Risk and Finance would have to approve.
+- After a holiday longer than 4 days, ECB can't be used until it publishes again.
+- A held change is kept in memory only. After a restart the new rate is checked again from the start.
 - If everything hangs during startup, the first requests can wait about 25 seconds.
-- Both sources belong to BOI, so one failure could affect both.
+- Only USD, EUR and GBP have a source other than BOI.
 - No authentication or rate limiting.

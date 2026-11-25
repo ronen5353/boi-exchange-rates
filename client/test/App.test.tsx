@@ -8,6 +8,8 @@ const rate = (currency: string, value: string, extra = {}) => ({
   rate: value,
   changePercent: '0.5111',
   rateDate: '2026-11-23',
+  source: 'boi',
+  fetchedAt: '2026-11-24T08:00:00.000Z',
   stale: false,
   ...extra,
 });
@@ -15,11 +17,24 @@ const allRates = () => [rate('USD', '3.343'), rate('EUR', '3.665'), rate('GBP', 
 const ok = (rates: unknown[] = allRates()) => new Response(JSON.stringify({ rates }));
 const fail = () => new Response('{}', { status: 503 });
 
+const okStatus = {
+  unavailable: [] as { currency: string; reason: string }[],
+  held: [] as string[],
+  backupReady: true,
+  lastSuccessAt: '2026-11-24T08:00:00.000Z',
+  storage: 'ok',
+};
+let status: typeof okStatus | null;
+/** Answers /api/rates; /api/status is answered from `status`. */
 const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
   fetchMock.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
+  status = okStatus;
+  vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+    if (input !== '/api/status') return fetchMock(input, init);
+    return new Response(JSON.stringify(status), { status: status ? 200 : 404 });
+  });
 });
 afterEach(() => {
   cleanup();
@@ -43,14 +58,24 @@ describe('rates', () => {
     fetchMock.mockResolvedValue(ok([rate('USD', '3.343', { stale: true }), ...allRates().slice(1)]));
     render(<App />);
     expect(await screen.findAllByText('Stale')).toHaveLength(1);
-    expect(screen.getByText(/could not be reached/)).toBeTruthy();
+    expect(screen.getByText(/could not be confirmed/)).toBeTruthy();
+  });
+
+  it('marks backup rates as not from BOI', async () => {
+    fetchMock.mockResolvedValue(
+      ok([rate('USD', '3.3498', { stale: true, status: 'backup' }), ...allRates().slice(1)]),
+    );
+    render(<App />);
+    expect(await screen.findByText('Backup')).toBeTruthy();
+    expect(screen.getByText(/come from the European Central Bank/)).toBeTruthy();
+    expect(screen.queryByText('Stale')).toBeNull();
   });
 
   it('ignores staleness of currencies that are not shown', async () => {
     fetchMock.mockResolvedValue(ok([...allRates(), rate('JPY', '0.021', { stale: true })]));
     render(<App />);
     await screen.findByText('3.343');
-    expect(screen.queryByText(/could not be reached/)).toBeNull();
+    expect(screen.queryByText(/could not be confirmed/)).toBeNull();
   });
 
   it('handles a missing currency and an unknown daily change', async () => {
@@ -61,7 +86,66 @@ describe('rates', () => {
   });
 });
 
+describe('status', () => {
+  it('shows the source, the confirmation time and the system status', async () => {
+    fetchMock.mockResolvedValue(ok());
+    render(<App />);
+    const usd = within(await screen.findByRole('article', { name: 'US dollar' }));
+    expect(usd.getByText('Source: Bank of Israel')).toBeTruthy();
+    expect(usd.getByText('Confirmed 24 Nov, 10:00')).toBeTruthy();
+    expect(await screen.findByText('Working, last reached 24 Nov, 10:00')).toBeTruthy();
+  });
+
+  it('explains a blocked rate', async () => {
+    status = { ...okStatus, held: ['USD'], unavailable: [{ currency: 'USD', reason: 'held' }] };
+    fetchMock.mockResolvedValue(ok(allRates().slice(1)));
+    render(<App />);
+    expect(await screen.findByText('Blocked: an unusual change is waiting for confirmation.')).toBeTruthy();
+    expect(screen.getByText('Unusual change waiting for confirmation: USD')).toBeTruthy();
+  });
+
+  it('explains why when every rate is blocked', async () => {
+    status = {
+      ...okStatus,
+      unavailable: ['USD', 'EUR', 'GBP'].map((currency) => ({ currency, reason: 'expired' })),
+    };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'NO_DATA' } }), { status: 503 }));
+    render(<App />);
+    expect(await screen.findAllByText('Blocked: the last known rate is too old to use.')).toHaveLength(3);
+    expect(screen.queryByText('Convert')).toBeNull();
+  });
+
+  it('shows database and backup problems', async () => {
+    status = { ...okStatus, storage: 'error', backupReady: false };
+    fetchMock.mockResolvedValue(ok());
+    render(<App />);
+    expect(await screen.findByText(/Failing/)).toBeTruthy();
+    expect(screen.getByText('No recent rate')).toBeTruthy();
+  });
+
+  it('works with an API that has no status', async () => {
+    status = null;
+    fetchMock.mockResolvedValue(ok());
+    render(<App />);
+    expect(await screen.findByText('3.343')).toBeTruthy();
+    expect(screen.queryByText('System status')).toBeNull();
+  });
+});
+
 describe('failures', () => {
+  it('removes the rates when the API says they can no longer be used', async () => {
+    vi.useFakeTimers();
+    const noData = new Response(JSON.stringify({ error: { code: 'NO_DATA' } }), { status: 503 });
+    fetchMock.mockResolvedValueOnce(ok()).mockResolvedValue(noData);
+    render(<App />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText('3.343')).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.queryByText('3.343')).toBeNull();
+    expect(screen.queryByText('Convert')).toBeNull();
+    expect(screen.getByText('Exchange rates are unavailable right now.')).toBeTruthy();
+  });
+
   it('shows an error and recovers on retry', async () => {
     fetchMock.mockResolvedValueOnce(fail()).mockResolvedValueOnce(ok());
     render(<App />);
@@ -102,6 +186,16 @@ describe('converter', () => {
     await userEvent.click(screen.getByRole('button', { name: /Swap/ }));
     fireEvent.change(screen.getByLabelText('Amount in ILS'), { target: { value: '4378.5' } });
     expect(result()).toBe('1,000.00 GBP');
+  });
+
+  it('keeps the selected currency when its rate is missing', async () => {
+    fetchMock.mockResolvedValue(ok(allRates().slice(1)));
+    render(<App />);
+    expect(await screen.findByText("USD can't be converted right now.")).toBeTruthy();
+    expect(result()).toBe('—');
+    expect(screen.queryByText(/Enter a positive number/)).toBeNull();
+    await userEvent.selectOptions(screen.getByLabelText('Currency'), 'EUR');
+    expect(result()).toBe('366.50 ILS');
   });
 
   it('explains an invalid amount, but not an empty one', async () => {

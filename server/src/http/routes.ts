@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { SUPPORTED_CURRENCIES } from '../domain/rates.js';
-import { NoRatesError, type RatesService } from '../rates/service.js';
+import type { RatesService } from '../rates/service.js';
 import { ApiError } from './errors.js';
-import { errorResponse, healthResponse, rateResponse, ratesResponse } from './schemas.js';
+import { errorResponse, healthResponse, rateResponse, ratesResponse, statusResponse } from './schemas.js';
 
 export function registerRoutes(app: FastifyInstance, service: RatesService): void {
   app.get(
@@ -29,20 +29,25 @@ export function registerRoutes(app: FastifyInstance, service: RatesService): voi
     },
     async (request) => {
       const currency = request.params.currency.toUpperCase();
-      const isSupported = SUPPORTED_CURRENCIES.includes(currency);
-      let rate;
-      try {
-        rate = (await service.getRates()).find((r) => r.currency === currency);
-      } catch (error) {
-        // An unknown currency is 404 even during an outage.
-        if (!(error instanceof NoRatesError) || isSupported) throw error;
-      }
+      const { rate, unavailable } = await service.getRate(currency);
       if (rate) return { base: 'ILS', ...rate };
-      if (isSupported) {
+      if (unavailable === 'expired') {
+        throw new ApiError(503, 'RATE_EXPIRED', `The last known rate of ${currency} is too old to use`);
+      }
+      if (unavailable === 'held') {
+        throw new ApiError(503, 'RATE_HELD', `An unusual change of ${currency} is waiting for confirmation`);
+      }
+      if (SUPPORTED_CURRENCIES.includes(currency)) {
         throw new ApiError(503, 'RATE_UNAVAILABLE', `No rate is currently available for ${currency}`);
       }
       throw new ApiError(404, 'UNSUPPORTED_CURRENCY', `Currency "${currency}" is not supported`);
     },
+  );
+
+  app.get(
+    '/api/status',
+    { schema: { summary: 'Data status, for the UI', response: { 200: statusResponse } } },
+    async () => service.status(),
   );
 
   // 200 whenever the process is alive: restarting us wouldn't fix an upstream outage.

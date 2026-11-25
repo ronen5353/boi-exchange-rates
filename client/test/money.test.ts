@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convert, formatDate, groupThousands } from '../src/money';
+import { convert, formatDate, formatTime, groupThousands } from '../src/money';
 
 describe('convert', () => {
   it('converts in both directions', () => {
@@ -31,4 +31,8 @@ it('groups thousands', () => {
 
 it('formats the date without shifting the day', () => {
   expect(formatDate('2026-11-23')).toBe('23 Nov 2026');
+});
+
+it('formats a time in Israel', () => {
+  expect(formatTime('2026-11-24T22:03:00.000Z')).toBe('25 Nov, 00:03');
 });

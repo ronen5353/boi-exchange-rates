@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RateSource } from '../domain/rates.js';
-import { InvalidUpstreamDataError, parseBoiResponse, parseSdmxResponse, type ParsedRates } from './schema.js';
+import { InvalidUpstreamDataError, parseBoiResponse, parseEcbResponse, parseSdmxResponse, type ParsedRates } from './schema.js';
 
 export class UpstreamHttpError extends Error {
   override name = 'UpstreamHttpError';
@@ -81,3 +81,6 @@ export const createBoiProvider = (options: ClientOptions) =>
 
 export const createSdmxProvider = (options: ClientOptions) =>
   createProvider('boi-sdmx', 'text/csv', parseSdmxResponse, options);
+
+export const createEcbProvider = (options: ClientOptions) =>
+  createProvider('ecb', 'text/xml', parseEcbResponse, options);

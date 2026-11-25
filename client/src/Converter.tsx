@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import type { Rate } from './api';
-import { convert, formatDate, groupThousands, type Direction } from './money';
+import { convert, formatDate, groupThousands, isValidAmount, type Direction } from './money';
 
-export function Converter({ rates }: { rates: Rate[] }) {
+export function Converter({ currencies, rates }: { currencies: string[]; rates: Rate[] }) {
   const [amount, setAmount] = useState('100');
   const [currency, setCurrency] = useState('USD');
   const [direction, setDirection] = useState<Direction>('toIls');
 
-  const rate = rates.find((r) => r.currency === currency) ?? rates[0];
-  if (!rate) return null;
-
-  const [from, to] = direction === 'toIls' ? [rate.currency, 'ILS'] : ['ILS', rate.currency];
-  const result = convert(amount, rate.rate, direction);
-  const showError = amount.trim() !== '' && result === null;
+  // Without a rate the selection stays: switching currency silently could mislead.
+  const rate = rates.find((r) => r.currency === currency);
+  const [from, to] = direction === 'toIls' ? [currency, 'ILS'] : ['ILS', currency];
+  const result = rate ? convert(amount, rate.rate, direction) : null;
+  const showError = amount.trim() !== '' && !isValidAmount(amount);
 
   return (
     <section className="converter" aria-labelledby="converter-title">
@@ -31,9 +30,9 @@ export function Converter({ rates }: { rates: Rate[] }) {
         </label>
         <label>
           Currency
-          <select value={rate.currency} onChange={(e) => setCurrency(e.target.value)}>
-            {rates.map((r) => (
-              <option key={r.currency}>{r.currency}</option>
+          <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            {currencies.map((code) => (
+              <option key={code}>{code}</option>
             ))}
           </select>
         </label>
@@ -47,10 +46,14 @@ export function Converter({ rates }: { rates: Rate[] }) {
         </p>
       )}
       <output aria-live="polite">{result === null ? '—' : `${groupThousands(result)} ${to}`}</output>
-      <p className="note">
-        1 {rate.currency} = {rate.rate} ILS, published {formatDate(rate.rateDate)}
-        {rate.stale && ' (may be out of date)'}
-      </p>
+      {rate ? (
+        <p className="note">
+          1 {currency} = {rate.rate} ILS, published {formatDate(rate.rateDate)}
+          {rate.status === 'backup' ? ' by the European Central Bank' : rate.stale && ' (may be out of date)'}
+        </p>
+      ) : (
+        <p className="blocked">{currency} can't be converted right now.</p>
+      )}
     </section>
   );
 }

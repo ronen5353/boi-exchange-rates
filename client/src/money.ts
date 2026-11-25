@@ -23,6 +23,17 @@ export function groupThousands(value: string): string {
   return fraction === undefined ? grouped : `${grouped}.${fraction}`;
 }
 
+/** A timestamp in Israel time: "24 Nov, 17:03". */
+export function formatTime(timestamp: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Jerusalem',
+  }).format(new Date(timestamp));
+}
+
 /** "2026-11-23" -> "23 Nov 2026". UTC on both sides, so the day never shifts. */
 export function formatDate(isoDate: string): string {
   return new Intl.DateTimeFormat('en-GB', {

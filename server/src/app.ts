@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -5,6 +6,8 @@ import { createBoiProvider, createEcbProvider, createSdmxProvider } from './boi/
 import type { Config } from './config.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerRoutes } from './http/routes.js';
+import { Alerts, createWebhookSender } from './monitoring/alerts.js';
+import { createMetrics, registerMetrics } from './monitoring/metrics.js';
 import { RatesService } from './rates/service.js';
 import { createPostgresStore } from './storage/postgres.js';
 import type { RateStore } from './storage/store.js';
@@ -17,7 +20,18 @@ export interface AppOverrides {
 }
 
 export async function buildApp(config: Config, overrides: AppOverrides = {}) {
-  const app: FastifyInstance = Fastify({ logger: { level: config.LOG_LEVEL, stream: overrides.logStream } });
+  const app: FastifyInstance = Fastify({
+    logger: { level: config.LOG_LEVEL, stream: overrides.logStream },
+    // The ID of the caller, if it has a safe format, so that one ID follows a deposit through all systems.
+    genReqId: (request) => {
+      const id = request.headers['x-request-id'];
+      return typeof id === 'string' && /^[\w.-]{1,64}$/.test(id) ? id : randomUUID();
+    },
+  });
+  app.addHook('onRequest', async (request, reply) => {
+    reply.header('x-request-id', request.id);
+  });
+  const metrics = createMetrics();
 
   const clientOptions = (source: string, url: string) => ({
     url,
@@ -53,10 +67,21 @@ export async function buildApp(config: Config, overrides: AppOverrides = {}) {
     cacheTtlMs: config.CACHE_TTL_MS,
     retryIntervalMs: config.RETRY_INTERVAL_MS,
     log: app.log,
+    onFetch: metrics.countFetch,
     now: overrides.now,
   });
 
+  const alerts = new Alerts({
+    getStatus: () => service.status(),
+    // Without a webhook, alerts are only logged.
+    send: config.ALERT_WEBHOOK_URL ? createWebhookSender(config.ALERT_WEBHOOK_URL) : async () => {},
+    warningDelayMs: config.ALERT_WARNING_DELAY_MS,
+    checkIntervalMs: config.ALERT_CHECK_INTERVAL_MS,
+    log: app.log,
+  });
+
   app.addHook('onClose', async () => {
+    await alerts.stop();
     await service.stop();
     await store?.close();
   });
@@ -66,7 +91,8 @@ export async function buildApp(config: Config, overrides: AppOverrides = {}) {
   });
   await app.register(swaggerUi, { routePrefix: '/docs' });
   registerErrorHandling(app);
-  registerRoutes(app, service);
+  registerMetrics(app, metrics, service);
+  registerRoutes(app, service, metrics);
 
-  return { app, service };
+  return { app, service, alerts };
 }

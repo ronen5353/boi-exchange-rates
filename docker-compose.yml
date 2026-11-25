@@ -16,6 +16,8 @@ services:
     build: ./server
     environment:
       DATABASE_URL: postgres://boi:boi@db:5432/boi
+      # Set it in .env to receive alerts.
+      ALERT_WEBHOOK_URL:
     # Deliberately not "service_healthy": the API must start without the database.
     depends_on:
       - db
@@ -30,6 +32,16 @@ services:
     depends_on:
       server:
         condition: service_healthy
+    restart: unless-stopped
+
+  # docker compose --profile monitoring up
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [monitoring]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring:/etc/prometheus:ro
     restart: unless-stopped
 
 volumes:

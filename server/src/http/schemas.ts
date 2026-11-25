@@ -38,6 +38,8 @@ const ErrorResponse = z.object({
 });
 
 const StatusResponse = z.object({
+  initialized: z.boolean(),
+  ready: z.boolean().describe('USD, EUR and GBP can be converted'),
   hasData: z.boolean(),
   stale: z.boolean(),
   held: z.array(z.string()).describe('Currencies with an unconfirmed change'),
@@ -49,6 +51,8 @@ const StatusResponse = z.object({
   storage: z.enum(['disabled', 'unknown', 'ok', 'error']),
 });
 
+const ReadyResponse = z.object({ ready: z.boolean() });
+
 const HealthResponse = z.object({ status: z.literal('ok'), rates: StatusResponse });
 
 const toJson = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'draft-7' });
@@ -58,4 +62,5 @@ export const rateResponse = toJson(RateResponse);
 export const conversionResponse = toJson(ConversionResponse);
 export const errorResponse = toJson(ErrorResponse);
 export const statusResponse = toJson(StatusResponse);
+export const readyResponse = toJson(ReadyResponse);
 export const healthResponse = toJson(HealthResponse);

@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { convertAmount, decimalsOf, isValidAmount } from '../domain/convert.js';
 import { SUPPORTED_CURRENCIES, type ServedRate } from '../domain/rates.js';
+import type { Metrics } from '../monitoring/metrics.js';
 import type { RatesService } from '../rates/service.js';
 import { ApiError } from './errors.js';
-import { conversionResponse, errorResponse, healthResponse, rateResponse, ratesResponse, statusResponse } from './schemas.js';
+import { conversionResponse, errorResponse, healthResponse, rateResponse, ratesResponse, readyResponse, statusResponse } from './schemas.js';
 
 async function requireRate(service: RatesService, currency: string): Promise<ServedRate> {
   const { rate, unavailable } = await service.getRate(currency);
@@ -28,7 +29,7 @@ interface ConvertQuery {
   officialOnly: boolean;
 }
 
-export function registerRoutes(app: FastifyInstance, service: RatesService): void {
+export function registerRoutes(app: FastifyInstance, service: RatesService, metrics: Metrics): void {
   app.get(
     '/api/rates',
     { schema: { summary: 'All latest rates', response: { 200: ratesResponse, 503: errorResponse } } },
@@ -102,6 +103,7 @@ export function registerRoutes(app: FastifyInstance, service: RatesService): voi
       const conversion = { conversionId: randomUUID(), from, to, amount, result, rate };
       // The record of which rate a deposit used.
       request.log.info(conversion, 'Conversion');
+      metrics.countConversion(rate.status);
       reply.header('cache-control', 'no-store');
       return conversion;
     },
@@ -111,6 +113,16 @@ export function registerRoutes(app: FastifyInstance, service: RatesService): voi
     '/api/status',
     { schema: { summary: 'Data status, for the UI', response: { 200: statusResponse } } },
     async () => service.status(),
+  );
+
+  // For load balancers: an instance that can't convert should not receive requests.
+  app.get(
+    '/ready',
+    { schema: { summary: 'Whether USD, EUR and GBP can be converted', response: { 200: readyResponse, 503: readyResponse } } },
+    async (_request, reply) => {
+      const { ready } = service.status();
+      return reply.code(ready ? 200 : 503).send({ ready });
+    },
   );
 
   // 200 whenever the process is alive: restarting us wouldn't fix an upstream outage.

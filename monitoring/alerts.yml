@@ -1,0 +1,33 @@
+# These complement the alerts that the server sends by itself: a server that is down can't report it.
+groups:
+  - name: boi-rates
+    rules:
+      - alert: ServerDown
+        expr: up{job="boi-rates"} == 0 or absent(up{job="boi-rates"})
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: 'The API does not answer' }
+
+      - alert: CannotConvert
+        expr: boi_ready == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: 'At least one of USD, EUR and GBP cannot be converted' }
+
+      - alert: BoiRateNotConfirmed
+        expr: max(boi_rate_age_seconds{currency=~"USD|EUR|GBP", source=~"boi.*"}) > 3600
+        for: 1m
+        labels: { severity: warning }
+        annotations: { summary: 'BOI has not confirmed a rate for an hour; it expires after 24 hours' }
+
+      - alert: ServerErrors
+        expr: sum(rate(boi_http_request_duration_seconds_count{status=~"5..", route!="/ready"}[5m])) > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: 'Requests are failing' }
+
+      - alert: SlowRequests
+        expr: histogram_quantile(0.95, sum by (le) (rate(boi_http_request_duration_seconds_bucket{route=~"/api/.*"}[5m]))) > 0.5
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: '5% of the requests take more than 0.5 seconds' }

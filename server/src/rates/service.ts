@@ -44,6 +44,7 @@ export interface RatesServiceOptions {
   retryIntervalMs: number;
   backupIntervalMs: number;
   log: Logger;
+  onFetch?: (source: RateSource, ok: boolean) => void;
   now?: () => number;
 }
 
@@ -53,6 +54,10 @@ export type RateResult =
   | { rate?: undefined; unavailable: 'expired' | 'held' | 'missing' };
 
 export interface ServiceStatus {
+  /** Whether the first refresh has ended, successfully or not. */
+  initialized: boolean;
+  /** Whether every required currency can be converted. */
+  ready: boolean;
   hasData: boolean;
   stale: boolean;
   /** Currencies with an unconfirmed change. They may still be served from the backup. */
@@ -146,6 +151,8 @@ export class RatesService {
   status(): ServiceStatus {
     const rates = this.usableRates();
     return {
+      initialized: this.initialized,
+      ready: this.initialized && REQUIRED_CURRENCIES.every((c) => this.resolve(c).rate !== undefined),
       hasData: rates.length > 0,
       stale: rates.some((r) => r.stale),
       held: [...this.held.keys()],
@@ -159,6 +166,15 @@ export class RatesService {
       lastSource: this.lastSource,
       storage: this.storage,
     };
+  }
+
+  rateAges() {
+    return this.usableRates().map(({ currency, source, status, fetchedAt }) => ({
+      currency,
+      source,
+      status,
+      ageMs: this.now() - Date.parse(fetchedAt),
+    }));
   }
 
   /** Never rejects. Concurrent callers share a single refresh. */
@@ -245,8 +261,10 @@ export class RatesService {
         for (const rate of accepted) this.backupCache.set(rate.currency, { ...rate, fetchedAt });
         this.save(accepted, fetchedAt);
         this.nextBackupAt = this.now() + backupIntervalMs;
+        this.options.onFetch?.(backup.name, true);
       } catch (err) {
         this.nextBackupAt = this.now() + retryIntervalMs;
+        this.options.onFetch?.(backup.name, false);
         log.warn({ source: backup.name, err }, 'Backup rate source failed');
       }
     };
@@ -279,9 +297,11 @@ export class RatesService {
       this.save(accepted, fetchedAt);
       this.lastSuccessAt = fetchedAt;
       this.lastSource = provider.name;
+      this.options.onFetch?.(provider.name, true);
       log.info({ source: provider.name, count: accepted.length }, 'Rates refreshed');
       return true;
     } catch (err) {
+      this.options.onFetch?.(provider.name, false);
       log.warn({ source: provider.name, err }, 'Rate source failed');
       return false;
     }

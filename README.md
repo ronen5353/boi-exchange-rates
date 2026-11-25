@@ -28,6 +28,8 @@ docker compose up --build
 - API: http://localhost:3000/api/rates
 - API docs (Swagger): http://localhost:3000/docs
 
+With `docker compose --profile monitoring up --build`, Prometheus with alert rules is at http://localhost:9090.
+
 ## Run without Docker
 
 Requires Node.js 22 or later (developed on 24). Use two terminals, starting from the project folder:
@@ -65,6 +67,8 @@ BOI is always mocked, so the tests need no network access. The PostgreSQL tests 
 | `GET /api/rates/:currency` | One rate, e.g. `/api/rates/USD` (case-insensitive) |
 | `GET /api/convert?from=ILS&to=USD&amount=1000` | Convert between ILS and another currency |
 | `GET /api/status` | Data status, for the UI: what is served from where, and what is blocked |
+| `GET /ready` | 200 if USD, EUR and GBP can be converted, otherwise 503 |
+| `GET /metrics` | Prometheus metrics |
 | `GET /health` | Process health and data status |
 
 Example, `GET /api/rates/JPY`:
@@ -129,6 +133,9 @@ Environment variables of the server, all optional. Invalid values stop it from s
 | `BACKUP_MAX_AGE_DAYS` | `4` | Maximum age of an ECB rate |
 | `MAX_CHANGE_PERCENT` | `5` | A larger change needs confirmation |
 | `CONFIRM_TOLERANCE_PERCENT` | `2` | How close a confirming source must be |
+| `ALERT_WEBHOOK_URL` | none | Slack-compatible webhook. Without it, alerts are only logged |
+| `ALERT_WARNING_DELAY_MS` | `60000` | Shorter problems that don't stop conversions are not announced |
+| `ALERT_CHECK_INTERVAL_MS` | `10000` | |
 | `UPSTREAM_TIMEOUT_MS` | `3000` | Timeout of one attempt |
 | `BACKUP_TIMEOUT_MS` | `10000` | The same, for ECB |
 | `UPSTREAM_ATTEMPTS` | `3` | Attempts per source |
@@ -180,6 +187,11 @@ stale; `rateDate` shows its date. Staleness is per currency because the fallback
 **Health is about the process.** `/health` returns 200 during a BOI outage, with the data status in its body.
 Restarting wouldn't fix BOI, and would lose the cache.
 
+**The team knows before the customer.** The server announces each problem once when it starts and once when it ends:
+*critical* if a main currency can't be converted, a change is held or ECB is in use, and *warning* otherwise. A
+server that is down can't report it, so Prometheus has its own rules (`monitoring/alerts.yml`). Every response has an
+`x-request-id`, taken from the caller if it sends one, which also appears in the logs.
+
 ## Limitations and next steps
 
 - The live demo has no database, so its rates are lost on restart.
@@ -189,4 +201,7 @@ Restarting wouldn't fix BOI, and would lose the cache.
 - If everything hangs during startup, the first requests can wait about 25 seconds.
 - Only USD, EUR and GBP have a source other than BOI.
 - Conversions are recorded in the logs, so the logs must be collected and kept.
+- `/metrics` and `/docs` are not protected, so in production they should be reachable only from inside the network.
+- Each instance sends its own alerts.
+- The Prometheus rules are evaluated, but delivering them needs an Alertmanager.
 - No authentication or rate limiting.

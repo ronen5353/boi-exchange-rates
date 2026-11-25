@@ -27,6 +27,10 @@ const ConfigSchema = z.object({
   BACKUP_MAX_AGE_DAYS: positiveInt.default(4),
   MAX_CHANGE_PERCENT: z.coerce.number().positive().default(5),
   CONFIRM_TOLERANCE_PERCENT: z.coerce.number().positive().default(2),
+  /** Optional. A Slack-compatible incoming webhook; it is a secret. */
+  ALERT_WEBHOOK_URL: z.url().optional(),
+  ALERT_WARNING_DELAY_MS: positiveInt.default(60_000),
+  ALERT_CHECK_INTERVAL_MS: positiveInt.default(10_000),
   UPSTREAM_TIMEOUT_MS: positiveInt.default(3_000),
   BACKUP_TIMEOUT_MS: positiveInt.default(10_000),
   UPSTREAM_ATTEMPTS: positiveInt.max(10).default(3),

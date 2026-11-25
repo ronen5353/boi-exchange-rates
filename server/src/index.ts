@@ -2,7 +2,7 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 
 const config = loadConfig(process.env);
-const { app, service } = await buildApp(config);
+const { app, service, alerts } = await buildApp(config);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
@@ -15,3 +15,4 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 await app.listen({ port: config.PORT, host: config.HOST });
 service.start();
+alerts.start();

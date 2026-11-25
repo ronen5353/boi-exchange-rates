@@ -38,7 +38,7 @@ export interface ServedRate extends StoredRate {
 }
 
 // Division rounds to `precision` digits; 100 is far more than any rate we accept.
-const ExactDecimal = Decimal.clone({ precision: 100 });
+export const ExactDecimal = Decimal.clone({ precision: 100 });
 
 export function normalizeRate(officialRate: string, unit: number): string {
   // toFixed() without arguments keeps every digit and never uses exponent notation.

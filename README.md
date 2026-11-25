@@ -63,6 +63,7 @@ BOI is always mocked, so the tests need no network access. The PostgreSQL tests 
 |---|---|
 | `GET /api/rates` | All rates |
 | `GET /api/rates/:currency` | One rate, e.g. `/api/rates/USD` (case-insensitive) |
+| `GET /api/convert?from=ILS&to=USD&amount=1000` | Convert between ILS and another currency |
 | `GET /api/status` | Data status, for the UI: what is served from where, and what is blocked |
 | `GET /health` | Process health and data status |
 
@@ -92,15 +93,21 @@ Example, `GET /api/rates/JPY`:
 - `status` – `fresh`; `stale`: the last known BOI rate, still within its time limit; `backup`: not a BOI rate.
 - `stale` – true unless the status is `fresh`.
 
+`/api/convert` returns `conversionId`, `result` and the full `rate` that was used, and logs all of them, so it is
+possible to prove which rate a deposit used. It calculates only; it doesn't move money or guarantee the rate. With
+`officialOnly=true` it refuses a rate that is not from BOI. Results are rounded half up.
+
 Errors have the form `{ "error": { "code", "message" } }`:
 
 | Status | Code | Meaning |
 |---|---|---|
+| 400 | `BAD_REQUEST`, `UNSUPPORTED_PAIR`, `INVALID_AMOUNT`, `AMOUNT_TOO_SMALL` | Invalid request |
 | 404 | `UNSUPPORTED_CURRENCY` | Currency not supported |
 | 404 | `NOT_FOUND` | No such route |
 | 503 | `NO_DATA` | No usable rates at all |
 | 503 | `RATE_EXPIRED` | The last known rate is too old, and there is no usable backup |
 | 503 | `RATE_HELD` | An unusual change is waiting for confirmation |
+| 503 | `RATE_NOT_OFFICIAL` | Only a backup rate is available, and `officialOnly` was requested |
 | 503 | `RATE_UNAVAILABLE` | Supported currency, but no rate for it right now |
 
 Supported: USD, EUR, GBP, JPY, AUD, CAD, DKK, NOK, ZAR, SEK, CHF, JOD, LBP, EGP.
@@ -181,4 +188,5 @@ Restarting wouldn't fix BOI, and would lose the cache.
 - A held change is kept in memory only. After a restart the new rate is checked again from the start.
 - If everything hangs during startup, the first requests can wait about 25 seconds.
 - Only USD, EUR and GBP have a source other than BOI.
+- Conversions are recorded in the logs, so the logs must be collected and kept.
 - No authentication or rate limiting.

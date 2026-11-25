@@ -13,10 +13,11 @@ export interface AppOverrides {
   fetchFn?: typeof fetch;
   now?: () => number;
   store?: RateStore;
+  logStream?: { write(line: string): void };
 }
 
 export async function buildApp(config: Config, overrides: AppOverrides = {}) {
-  const app: FastifyInstance = Fastify({ logger: { level: config.LOG_LEVEL } });
+  const app: FastifyInstance = Fastify({ logger: { level: config.LOG_LEVEL, stream: overrides.logStream } });
 
   const clientOptions = (source: string, url: string) => ({
     url,

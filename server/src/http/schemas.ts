@@ -22,6 +22,15 @@ const RatesResponse = z.object({
   rates: z.array(RateSchema),
 });
 
+const ConversionResponse = z.object({
+  conversionId: z.string().describe('Identifies this conversion in the logs'),
+  from: z.string(),
+  to: z.string(),
+  amount: z.string(),
+  result: z.string().describe('Rounded half up to the decimals of the currency'),
+  rate: RateSchema,
+});
+
 const RateResponse = RateSchema.extend({ base: z.literal('ILS') });
 
 const ErrorResponse = z.object({
@@ -46,6 +55,7 @@ const toJson = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'draft-7'
 
 export const ratesResponse = toJson(RatesResponse);
 export const rateResponse = toJson(RateResponse);
+export const conversionResponse = toJson(ConversionResponse);
 export const errorResponse = toJson(ErrorResponse);
 export const statusResponse = toJson(StatusResponse);
 export const healthResponse = toJson(HealthResponse);

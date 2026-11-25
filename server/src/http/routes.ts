@@ -1,8 +1,32 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { SUPPORTED_CURRENCIES } from '../domain/rates.js';
+import { convertAmount, decimalsOf, isValidAmount } from '../domain/convert.js';
+import { SUPPORTED_CURRENCIES, type ServedRate } from '../domain/rates.js';
 import type { RatesService } from '../rates/service.js';
 import { ApiError } from './errors.js';
-import { errorResponse, healthResponse, rateResponse, ratesResponse, statusResponse } from './schemas.js';
+import { conversionResponse, errorResponse, healthResponse, rateResponse, ratesResponse, statusResponse } from './schemas.js';
+
+async function requireRate(service: RatesService, currency: string): Promise<ServedRate> {
+  const { rate, unavailable } = await service.getRate(currency);
+  if (rate) return rate;
+  if (unavailable === 'expired') {
+    throw new ApiError(503, 'RATE_EXPIRED', `The last known rate of ${currency} is too old to use`);
+  }
+  if (unavailable === 'held') {
+    throw new ApiError(503, 'RATE_HELD', `An unusual change of ${currency} is waiting for confirmation`);
+  }
+  if (SUPPORTED_CURRENCIES.includes(currency)) {
+    throw new ApiError(503, 'RATE_UNAVAILABLE', `No rate is currently available for ${currency}`);
+  }
+  throw new ApiError(404, 'UNSUPPORTED_CURRENCY', `Currency "${currency}" is not supported`);
+}
+
+interface ConvertQuery {
+  from: string;
+  to: string;
+  amount: string;
+  officialOnly: boolean;
+}
 
 export function registerRoutes(app: FastifyInstance, service: RatesService): void {
   app.get(
@@ -29,18 +53,57 @@ export function registerRoutes(app: FastifyInstance, service: RatesService): voi
     },
     async (request) => {
       const currency = request.params.currency.toUpperCase();
-      const { rate, unavailable } = await service.getRate(currency);
-      if (rate) return { base: 'ILS', ...rate };
-      if (unavailable === 'expired') {
-        throw new ApiError(503, 'RATE_EXPIRED', `The last known rate of ${currency} is too old to use`);
+      return { base: 'ILS', ...(await requireRate(service, currency)) };
+    },
+  );
+
+  app.get<{ Querystring: ConvertQuery }>(
+    '/api/convert',
+    {
+      schema: {
+        summary: 'Convert an amount between ILS and another currency',
+        querystring: {
+          type: 'object',
+          required: ['from', 'to', 'amount'],
+          properties: {
+            from: { type: 'string', description: 'E.g. ILS' },
+            to: { type: 'string', description: 'E.g. USD' },
+            amount: { type: 'string', description: 'E.g. 1250.50' },
+            officialOnly: { type: 'boolean', default: false, description: 'Refuse a rate that is not from BOI' },
+          },
+        },
+        response: { 200: conversionResponse, 400: errorResponse, 404: errorResponse, 503: errorResponse },
+      },
+    },
+    async (request, reply) => {
+      const { amount, officialOnly } = request.query;
+      const from = request.query.from.toUpperCase();
+      const to = request.query.to.toUpperCase();
+      if ((from === 'ILS') === (to === 'ILS')) {
+        throw new ApiError(400, 'UNSUPPORTED_PAIR', 'Exactly one of the currencies must be ILS');
       }
-      if (unavailable === 'held') {
-        throw new ApiError(503, 'RATE_HELD', `An unusual change of ${currency} is waiting for confirmation`);
+      if (!isValidAmount(amount, from)) {
+        throw new ApiError(
+          400,
+          'INVALID_AMOUNT',
+          `The amount must be positive, with up to 12 digits and ${decimalsOf(from)} decimals`,
+        );
       }
-      if (SUPPORTED_CURRENCIES.includes(currency)) {
-        throw new ApiError(503, 'RATE_UNAVAILABLE', `No rate is currently available for ${currency}`);
+
+      const rate = await requireRate(service, from === 'ILS' ? to : from);
+      if (officialOnly && rate.status === 'backup') {
+        throw new ApiError(503, 'RATE_NOT_OFFICIAL', 'Only a backup rate is available');
       }
-      throw new ApiError(404, 'UNSUPPORTED_CURRENCY', `Currency "${currency}" is not supported`);
+      const result = convertAmount(amount, to, rate.rate);
+      if (Number(result) === 0) {
+        throw new ApiError(400, 'AMOUNT_TOO_SMALL', 'The result rounds to zero');
+      }
+
+      const conversion = { conversionId: randomUUID(), from, to, amount, result, rate };
+      // The record of which rate a deposit used.
+      request.log.info(conversion, 'Conversion');
+      reply.header('cache-control', 'no-store');
+      return conversion;
     },
   );
 

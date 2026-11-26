@@ -151,6 +151,9 @@ Environment variables of the server, all optional. Invalid values stop it from s
 
 ## Design decisions
 
+[docs/OPERATIONS.md](docs/OPERATIONS.md) covers the operational side: assumptions, service levels, failures,
+alerts and manual procedures.
+
 **Layers of sources.** A customer who can't convert can't buy, so each layer covers for the one before it:
 
 1. BOI's public API.

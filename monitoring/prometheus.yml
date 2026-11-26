@@ -6,6 +6,10 @@ rule_files:
   - alerts.yml
 
 scrape_configs:
+  # Directly, and not through the gateway, to see each instance.
   - job_name: boi-rates
     static_configs:
-      - targets: ['server:3000']
+      - targets: ['server1:3000', 'server2:3000']
+  - job_name: gateway
+    static_configs:
+      - targets: ['gateway:8405']

@@ -2,14 +2,26 @@
 groups:
   - name: boi-rates
     rules:
-      - alert: ServerDown
-        expr: up{job="boi-rates"} == 0 or absent(up{job="boi-rates"})
-        for: 1m
+      - alert: AllServersDown
+        expr: sum(up{job="boi-rates"}) == 0 or absent(up{job="boi-rates"})
+        for: 30s
         labels: { severity: critical }
-        annotations: { summary: 'The API does not answer' }
+        annotations: { summary: 'No API instance answers' }
+
+      - alert: ServerDown
+        expr: up{job="boi-rates"} == 0
+        for: 1m
+        labels: { severity: warning }
+        annotations: { summary: '{{ $labels.instance }} does not answer, so nothing is left to take over' }
+
+      - alert: GatewayDown
+        expr: up{job="gateway"} == 0 or absent(up{job="gateway"})
+        for: 30s
+        labels: { severity: critical }
+        annotations: { summary: 'The gateway does not answer' }
 
       - alert: CannotConvert
-        expr: boi_ready == 0
+        expr: max(boi_ready) == 0
         for: 1m
         labels: { severity: critical }
         annotations: { summary: 'At least one of USD, EUR and GBP cannot be converted' }

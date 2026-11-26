@@ -28,6 +28,9 @@ docker compose up --build
 - API: http://localhost:3000/api/rates
 - API docs (Swagger): http://localhost:3000/docs
 
+This starts two API instances behind a gateway (HAProxy). `node gateway/drill.mjs` breaks them one by one under
+traffic and counts failed requests.
+
 With `docker compose --profile monitoring up --build`, Prometheus with alert rules is at http://localhost:9090.
 
 ## Run without Docker
@@ -67,8 +70,8 @@ BOI is always mocked, so the tests need no network access. The PostgreSQL tests 
 | `GET /api/rates/:currency` | One rate, e.g. `/api/rates/USD` (case-insensitive) |
 | `GET /api/convert?from=ILS&to=USD&amount=1000` | Convert between ILS and another currency |
 | `GET /api/status` | Data status, for the UI: what is served from where, and what is blocked |
-| `GET /ready` | 200 if USD, EUR and GBP can be converted, otherwise 503 |
-| `GET /metrics` | Prometheus metrics |
+| `GET /ready` | For load balancers: 503 if this instance should not receive requests |
+| `GET /metrics` | Prometheus metrics; not available through the gateway |
 | `GET /health` | Process health and data status |
 
 Example, `GET /api/rates/JPY`:
@@ -108,6 +111,9 @@ Errors have the form `{ "error": { "code", "message" } }`:
 | 400 | `BAD_REQUEST`, `UNSUPPORTED_PAIR`, `INVALID_AMOUNT`, `AMOUNT_TOO_SMALL` | Invalid request |
 | 404 | `UNSUPPORTED_CURRENCY` | Currency not supported |
 | 404 | `NOT_FOUND` | No such route |
+| 429 | `RATE_LIMITED` | From the gateway: more than 500 requests in 10 seconds from one address |
+| 503 | `SERVICE_UNAVAILABLE` | From the gateway: no instance is available |
+| 504 | `GATEWAY_TIMEOUT` | From the gateway: the instance did not answer in time |
 | 503 | `NO_DATA` | No usable rates at all |
 | 503 | `RATE_EXPIRED` | The last known rate is too old, and there is no usable backup |
 | 503 | `RATE_HELD` | An unusual change is waiting for confirmation |
@@ -125,6 +131,7 @@ Environment variables of the server, all optional. Invalid values stop it from s
 | `PORT` | `3000` | |
 | `HOST` | `0.0.0.0` | |
 | `LOG_LEVEL` | `info` | |
+| `SHUTDOWN_DELAY_MS` | `0` | Time to keep answering after a shutdown signal, up to 5000 |
 | `DATABASE_URL` | none | PostgreSQL. Without it, rates are kept in memory only |
 | `CACHE_TTL_MS` | `300000` | Time between background refreshes |
 | `RETRY_INTERVAL_MS` | `30000` | The same, after a failure or after using the fallback |
@@ -192,6 +199,13 @@ Restarting wouldn't fix BOI, and would lose the cache.
 server that is down can't report it, so Prometheus has its own rules (`monitoring/alerts.yml`). Every response has an
 `x-request-id`, taken from the caller if it sends one, which also appears in the logs.
 
+**One instance works, another is ready.** The gateway checks `/ready` of both every second. If the working instance
+crashes, hangs or can't convert, requests go to the standby, and a request that was already sent is retried there,
+which is safe because the API only reads and calculates. Traffic isn't split, because load isn't the problem and two
+instances refresh at different moments, so a customer could see two rates alternate. A held change doesn't cause a
+switch: otherwise an instance that hasn't seen the change yet would bypass the check. A server that is stopped first
+becomes not ready, keeps answering for 3 seconds and only then closes, so deployments don't fail requests.
+
 ## Limitations and next steps
 
 - The live demo has no database, so its rates are lost on restart.
@@ -201,7 +215,10 @@ server that is down can't report it, so Prometheus has its own rules (`monitorin
 - If everything hangs during startup, the first requests can wait about 25 seconds.
 - Only USD, EUR and GBP have a source other than BOI.
 - Conversions are recorded in the logs, so the logs must be collected and kept.
-- `/metrics` and `/docs` are not protected, so in production they should be reachable only from inside the network.
+- `/metrics` is hidden only by the gateway, so without it, as in the live demo, it is public. `/docs` is always public.
+- There is one gateway, one database and one computer. In production these would be a managed load balancer, a
+  replicated database and instances in two zones.
+- Right after a switch between instances the rate can differ until both have refreshed, up to 5 minutes.
 - Each instance sends its own alerts.
 - The Prometheus rules are evaluated, but delivering them needs an Alertmanager.
-- No authentication or rate limiting.
+- No authentication. Rate limiting is per address and only in the gateway.

@@ -92,7 +92,11 @@ export async function buildApp(config: Config, overrides: AppOverrides = {}) {
   await app.register(swaggerUi, { routePrefix: '/docs' });
   registerErrorHandling(app);
   registerMetrics(app, metrics, service);
-  registerRoutes(app, service, metrics);
+  let draining = false;
+  registerRoutes(app, service, metrics, () => draining);
 
-  return { app, service, alerts };
+  const drain = () => {
+    draining = true;
+  };
+  return { app, service, alerts, drain };
 }

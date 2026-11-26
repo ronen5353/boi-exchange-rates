@@ -5,6 +5,8 @@ const positiveInt = z.coerce.number().int().positive();
 const ConfigSchema = z.object({
   PORT: positiveInt.max(65535).default(3000),
   HOST: z.string().default('0.0.0.0'),
+  /** Keeps answering for this long after a shutdown signal, so that a load balancer can stop using us. */
+  SHUTDOWN_DELAY_MS: z.coerce.number().int().min(0).max(5_000).default(0),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   BOI_URL: z.url().default('https://boi.org.il/PublicApi/GetExchangeRates'),
   SDMX_URL: z

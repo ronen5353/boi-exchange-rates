@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { convertAmount, decimalsOf, isValidAmount } from '../domain/convert.js';
-import { SUPPORTED_CURRENCIES, type ServedRate } from '../domain/rates.js';
+import { REQUIRED_CURRENCIES, SUPPORTED_CURRENCIES, type ServedRate } from '../domain/rates.js';
 import type { Metrics } from '../monitoring/metrics.js';
 import type { RatesService } from '../rates/service.js';
 import { ApiError } from './errors.js';
@@ -29,7 +29,7 @@ interface ConvertQuery {
   officialOnly: boolean;
 }
 
-export function registerRoutes(app: FastifyInstance, service: RatesService, metrics: Metrics): void {
+export function registerRoutes(app: FastifyInstance, service: RatesService, metrics: Metrics, isDraining: () => boolean): void {
   app.get(
     '/api/rates',
     { schema: { summary: 'All latest rates', response: { 200: ratesResponse, 503: errorResponse } } },
@@ -115,12 +115,17 @@ export function registerRoutes(app: FastifyInstance, service: RatesService, metr
     async () => service.status(),
   );
 
-  // For load balancers: an instance that can't convert should not receive requests.
+  // For load balancers: an instance that can't convert should not receive requests. A held change is
+  // different: it is a decision, and another instance that didn't see the change must not bypass it.
   app.get(
     '/ready',
-    { schema: { summary: 'Whether USD, EUR and GBP can be converted', response: { 200: readyResponse, 503: readyResponse } } },
+    { schema: { summary: 'Whether this instance should receive requests', response: { 200: readyResponse, 503: readyResponse } } },
     async (_request, reply) => {
-      const { ready } = service.status();
+      const { initialized, unavailable } = service.status();
+      const ready =
+        initialized &&
+        !isDraining() &&
+        !unavailable.some((u) => u.reason !== 'held' && (REQUIRED_CURRENCIES as readonly string[]).includes(u.currency));
       return reply.code(ready ? 200 : 503).send({ ready });
     },
   );

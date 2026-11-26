@@ -3,7 +3,7 @@ import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { Alerts, createWebhookSender, findProblems } from '../src/monitoring/alerts.js';
 import type { ServiceStatus } from '../src/rates/service.js';
-import { fakeUpstream, status as httpStatus, xml } from './helpers.js';
+import { boiBody, boiItem, fakeUpstream, json, status as httpStatus, xml } from './helpers.js';
 
 const healthy: ServiceStatus = {
   initialized: true,
@@ -125,12 +125,12 @@ describe('endpoints', () => {
 
   async function setup() {
     const upstream = fakeUpstream();
-    const { app, service } = await buildApp(loadConfig({ LOG_LEVEL: 'silent', UPSTREAM_ATTEMPTS: '1' }), {
+    const { app, service, drain } = await buildApp(loadConfig({ LOG_LEVEL: 'silent', UPSTREAM_ATTEMPTS: '1' }), {
       fetchFn: upstream.fetchFn,
       now: () => Date.parse('2026-11-24T08:00:00Z'),
     });
     closeApp = () => app.close();
-    return { app, service, ...upstream };
+    return { app, service, drain, ...upstream };
   }
 
   it('/ready is 503 until rates are loaded', async () => {
@@ -157,6 +157,26 @@ describe('endpoints', () => {
     handlers.ecb = async () => xml();
     await service.refresh();
     expect((await app.inject('/ready')).statusCode).toBe(200);
+  });
+
+  it('/ready stays 200 during a hold, so that a load balancer does not bypass it', async () => {
+    const { app, service, handlers } = await setup();
+    await service.refresh();
+    const changed = [boiItem('USD', 33.43), boiItem('EUR', 3.665), boiItem('GBP', 4.3785)];
+    handlers.boi = async () => json(boiBody(changed));
+    handlers.sdmx = down;
+    await service.refresh();
+    expect((await app.inject('/api/rates/USD')).json().error.code).toBe('RATE_HELD');
+    expect((await app.inject('/ready')).statusCode).toBe(200);
+    expect(service.status().ready).toBe(false);
+  });
+
+  it('answers requests while draining, but is not ready', async () => {
+    const { app, service, drain } = await setup();
+    await service.refresh();
+    drain();
+    expect((await app.inject('/ready')).statusCode).toBe(503);
+    expect((await app.inject('/api/rates/USD')).statusCode).toBe(200);
   });
 
   it('/metrics exposes rates, sources, requests and conversions', async () => {
